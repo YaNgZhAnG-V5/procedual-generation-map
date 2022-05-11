@@ -1,6 +1,8 @@
 # coding: utf-8
 
-import language
+from language import Language
+from civilization import CitiesPlacement
+from plotter import Plotter
 
 import numpy as np
 import matplotlib as mpl
@@ -14,23 +16,16 @@ import noise
 import itertools
 from utils import *
 
-tex = False
-
-if tex:
-    plt.rcParams['text.usetex'] = True
-    plt.rcParams['text.latex.unicode'] = True
-    plt.rcParams['font.family'] = 'palatino'
-else:
-    plt.rcParams['font.family'] = "Palatino Linotype"
-
+plt.rcParams['font.family'] = "Palatino Linotype"
 plt.rcParams['font.size'] = 10
 
 
 class MapGrid(object):
     def __init__(self, mode='shore', n=16384):
         self.mode = mode
-        self.lang = language.get_language()
+        self.lang = Language()
         self.build_grid(n)
+
         if '/' in mode:
             self.mixed_heightmap()
             mode = mode.split("/")[0]
@@ -38,9 +33,12 @@ class MapGrid(object):
             self.single_heightmap(mode)
         self.finalize()
         self.riverperc = riverpercs[mode] * np.mean(self.elevation > 0)
-        self.place_cities(np.random.randint(*city_counts[mode]))
-        self.grow_territory(np.random.randint(*terr_counts[mode]))
-        self.name_places()
+
+        cities_placer = CitiesPlacement(self.flow, self.elevation, self.vxs, self.adj_vxs, self.edge_weight)
+        self.cities = cities_placer.place_cities(np.random.randint(*city_counts[mode]))
+        self.territories = cities_placer.grow_territory(np.random.randint(*terr_counts[mode]))
+        self.city_names, self.region_names = self.lang.name_places(self.cities, self.territories)
+
         self.path_cache = {}
         self.fill_path_cache(self.big_cities)
 
@@ -58,13 +56,12 @@ class MapGrid(object):
         self.vor = spl.Voronoi(self.pts)
         self.regions = [self.vor.regions[i] for i in self.vor.point_region]
         self.vxs = self.vor.vertices
-        self.nvxs = self.vxs.shape[0]
         self.build_adjs()
         self.improve_vxs()
         self.calc_edges()
         self.distort_vxs()
-        self.elevation = np.zeros(self.nvxs + 1)
-        self.erodability = np.ones(self.nvxs)
+        self.elevation = np.zeros(self.vxs.shape[0] + 1)
+        self.erodability = np.ones(self.vxs.shape[0])
 
     def do_erosion(self, n, rate=0.01):
         for _ in range(n):
@@ -115,7 +112,7 @@ class MapGrid(object):
 
     def improve_vxs(self):
         print("Improving vertices")
-        n = self.nvxs
+        n = self.vxs.shape[0]
         for v in range(n):
             self.vxs[v, :] = np.mean(self.pts[self.vx_regions[v]], 0)
 
@@ -138,13 +135,13 @@ class MapGrid(object):
         for p in range(self.pts.shape[0]):
             for v in self.regions[p]:
                 self.tris[v].append(p)
-        self.adj_mat = np.zeros((self.nvxs, 3), np.int32) - 1
+        self.adj_mat = np.zeros((self.vxs.shape[0], 3), np.int32) - 1
         for k, v in self.adj_vxs.items():
             if k != -1:
                 self.adj_mat[k, :] = v
 
     def calc_edges(self):
-        n = self.nvxs
+        n = self.vxs.shape[0]
         self.edge = np.zeros(n, bool)
         for u in range(n):
             adjs = self.adj_vxs[u]
@@ -185,7 +182,7 @@ class MapGrid(object):
 
     def shore_heightmap(self):
         print("Calculating elevations")
-        n = self.nvxs
+        n = self.vxs.shape[0]
         self.elevation = np.zeros(n + 1)
         self.elevation[:-1] = 0.5 + ((self.dvxs - 0.5) * np.random.normal(0, 4, (1, 2))).sum(1)
         self.elevation[:-1] += -4 * (np.random.random() - 0.5) * distance(self.vxs, 0.5)
@@ -269,7 +266,7 @@ class MapGrid(object):
 
     def relax(self):
         newelev = np.zeros_like(self.elevation[:-1])
-        for u in range(self.nvxs):
+        for u in range(self.vxs.shape[0]):
             adjs = [v for v in self.adj_vxs[u] if v != -1]
             if len(adjs) < 2: continue
             newelev[u] = np.mean(self.elevation[adjs])
@@ -290,7 +287,7 @@ class MapGrid(object):
                 self.elevation_pts[p] = np.mean(self.elevation[self.regions[p]])
 
     def calc_downhill(self):
-        n = self.nvxs
+        n = self.vxs.shape[0]
         dhidxs = np.argmin(self.elevation[self.adj_mat], 1)
         downhill = self.adj_mat[np.arange(n), dhidxs]
         downhill[self.elevation[:-1] <= self.elevation[downhill]] = -1
@@ -298,7 +295,7 @@ class MapGrid(object):
         self.downhill = downhill
 
     def calc_flow(self):
-        n = self.nvxs
+        n = self.vxs.shape[0]
         rain = np.ones(n) / n
         i = self.downhill[self.downhill != -1]
         j = np.arange(n)[self.downhill != -1]
@@ -375,7 +372,7 @@ class MapGrid(object):
     def clean_coast(self, n=3, outwards=True):
         for _ in range(n):
             new_elev = self.elevation[:-1].copy()
-            for u in range(self.nvxs):
+            for u in range(self.vxs.shape[0]):
                 if self.edge[u] or self.elevation[u] <= 0:
                     continue
                 adjs = self.adj_vxs[u]
@@ -384,7 +381,7 @@ class MapGrid(object):
                     new_elev[u] = np.mean(adjelevs[adjelevs <= 0])
             self.elevation[:-1] = new_elev
             if outwards:
-                for u in range(self.nvxs):
+                for u in range(self.vxs.shape[0]):
                     if self.edge[u] or self.elevation[u] > 0:
                         continue
                     adjs = self.adj_vxs[u]
@@ -392,18 +389,6 @@ class MapGrid(object):
                     if np.sum(adjelevs <= 0) == 1:
                         new_elev[u] = np.mean(adjelevs[adjelevs > 0])
                 self.elevation[:-1] = new_elev
-
-    def place_cities(self, n=20):
-        self.city_score = self.flow ** 0.5
-        self.city_score[self.elevation[:-1] <= 0] = -9999999
-        self.cities = []
-        while len(self.cities) < n:
-            newcity = np.argmax(self.city_score)
-            if np.random.random() < (len(self.cities) + 1) ** -0.2 and \
-                    0.1 < self.vxs[newcity, 0] < 0.9 and \
-                    0.1 < self.vxs[newcity, 1] < 0.9:
-                self.cities.append(newcity)
-            self.city_score -= 0.01 * 1 / (distance(self.vxs, self.vxs[newcity, :]) + 1e-9)
 
     def edge_weight(self, u, v, territory=False):
         horiz = distance(self.vxs[u, :], self.vxs[v, :])
@@ -416,7 +401,7 @@ class MapGrid(object):
         else:
             if self.downhill[u] == v or self.downhill[v] == u:
                 difficulty *= 0.9
-        if (self.elevation[u] <= 0):
+        if self.elevation[u] <= 0:
             difficulty = 1
         if (self.elevation[u] <= 0) != (self.elevation[v] <= 0):
             difficulty = 2000 if territory else 200
@@ -509,23 +494,6 @@ class MapGrid(object):
             print("CACHE", len(self.path_cache))
             return path, length
 
-    def grow_territory(self, n=7):
-        done = np.zeros(self.nvxs, np.int32) - 1
-        q = []
-        for city in self.cities[:n]:
-            heapq.heappush(q, (0, city, city))
-        while q:
-            dist, vx, city = heapq.heappop(q)
-            if done[vx] != -1:
-                continue
-            done[vx] = city
-            for u in self.adj_vxs[vx]:
-                if done[u] != -1 or u == -1:
-                    continue
-                newdist = self.edge_weight(u, vx, territory=True)
-                heapq.heappush(q, (dist + newdist, u, city))
-        self.territories = done
-
     def extend_area(self, area, n):
         for _ in range(10):
             adj = self.adj_mat[area, :]
@@ -551,211 +519,6 @@ class MapGrid(object):
                     key=totallength)
         return clist
 
-    def plot(self, filename, rivers=True, cmap=mpl.cm.Greys, **kwargs):
-        print("Plotting")
-        fig = plt.figure(figsize=(6, 6))
-        ax = fig.add_axes([0, 0, 1, 1])
-
-        elev = np.where(self.elevation > 0, 0.1, 0)
-        good = ~self.extend_area(self.edge, 10)
-
-        goodidxs = [i for i in range(self.nvxs) if good[i]]
-        tris = [self.tris[i] for i in goodidxs]
-        elevs = elev[goodidxs]
-
-        slopelines = []
-        r = 0.25 * self.nvxs ** -0.5
-        for i in goodidxs:
-            if self.elevation[i] <= 0: continue
-            t = self.tris[i]
-            s, s2 = trislope(self.pts[t, :], self.elevation_pts[t])
-            s /= 10
-            if abs(s) < 0.1 + 0.3 * np.random.random():
-                continue
-            x, y = self.vxs[i, :]
-            l = r * (1 + np.random.random()) \
-                * (1 - 0.2 * np.arctan(s) ** 2) \
-                * np.exp(s2 / 100)
-            if abs(l * s) > 2 * r:
-                n = int(abs(l * s / r))
-                l /= n
-                uv = np.random.normal(0, r / 2, (min(n, 4), 2))
-                for u, v in uv:
-                    slopelines.append([(x + u - l, y + v - l * s), (x + u + l,
-                                                                    y + v + l * s)])
-            else:
-                slopelines.append([(x - l, y - l * s), (x + l, y + l * s)])
-
-        slopecol = mpl.collections.LineCollection(slopelines)
-        slopecol.set_zorder(1)
-        slopecol.set_color('black')
-        slopecol.set_linewidth(0.3)
-        ax.add_collection(slopecol)
-
-        #         land = np.where(elevs > 0)[0]
-        #         landpatches = [mpl.patches.Polygon(self.pts[tris[i],:], closed=True) for i in land]
-        #         landpatchcol = mpl.collections.PatchCollection(landpatches)
-        #         landpatchcol.set_color(colors[land,:])
-        #         landpatchcol.set_zorder(0)
-        #         ax.gca().add_collection(landpatchcol)
-
-        sea = np.where(elevs <= 0)[0]
-        seapatches = [mpl.patches.Polygon(self.pts[tris[i], :], closed=True) for i in sea]
-        seapatchcol = mpl.collections.PatchCollection(seapatches)
-        seapatchcol.set_color('white')
-        seapatchcol.set_zorder(10)
-        ax.add_collection(seapatchcol)
-
-        if rivers:
-            land = good & (self.elevation[:-1] > 0) & (self.downhill != -1) & \
-                   (self.flow > np.percentile(self.flow, 100 - self.riverperc))
-            rivers = relaxpts(self.vxs, [(u, self.downhill[u]) for u in range(self.nvxs) if land[u]])
-            print(len(rivers), sum(land))
-            rivers = mergelines(rivers)
-            rivercol = mpl.collections.PathCollection(rivers)
-            rivercol.set_edgecolor('black')
-            rivercol.set_linewidth(1)
-            rivercol.set_facecolor('none')
-            rivercol.set_zorder(9)
-            ax.add_collection(rivercol)
-
-        bigcities = self.big_cities
-        smallcities = [c for c in self.cities if c not in bigcities]
-        ax.scatter(self.vxs[bigcities, 0], self.vxs[bigcities, 1],
-                   c='white', s=100, zorder=15, edgecolor='black', linewidth=2)
-        ax.scatter(self.vxs[smallcities, 0], self.vxs[smallcities, 1],
-                   c='black', s=30, zorder=15, edgecolor='none')
-
-        labelbox = dict(
-            boxstyle='round,pad=0.1',
-            fc='white',
-            ec='none'
-        )
-        for city in self.cities:
-            ax.annotate(xy=self.vxs[city, :], text=self.city_names[city],
-                        xytext=(0, 12 if city in bigcities else 8),
-                        ha='center', va='center',
-                        textcoords='offset points',
-                        bbox=labelbox,
-                        size='small' if city in bigcities else 'x-small',
-                        zorder=20.5 if city in bigcities else 20)
-        reglabels = []
-        for terr in sorted(np.unique(self.territories),
-                           key=lambda t: np.sum(
-                               (self.territories == t) & (self.elevation[:-1] > 0))):
-            name = self.region_names[terr]
-            w = 0.06 + 0.015 * len(name)
-            region = (self.territories == terr)
-            landregion = region & (self.elevation[:-1] > 0)
-            scores = np.zeros(self.nvxs)
-            center = np.mean(self.vxs[region, :], 0)
-            landcenter = np.mean(self.vxs[landregion, :], 0)
-            landradius = np.mean(landregion) ** 0.5
-            scores = -5000 * distance(self.vxs, landcenter)
-            scores -= 1000 * distance(self.vxs, center)
-            scores[~region] -= 3000
-            for city in self.cities:
-                dists = self.vxs - self.vxs[city, :] - np.array([[0, 0.02]])
-                exclude = (np.abs(dists[:, 0]) < w) & (np.abs(dists[:, 1]) < 0.05)
-                scores[exclude] -= 4000 if city in bigcities else 500
-            for rl in reglabels:
-                dists = self.vxs - rl
-                exclude = (np.abs(dists[:, 0]) < 0.15 + w) & (np.abs(dists[:, 1]) < 0.1)
-                scores[exclude] -= 5000
-
-            scores[self.elevation[:-1] <= 0] -= 500
-            scores[self.vxs[:, 0] > 1.06 - w] -= 50000
-            scores[self.vxs[:, 0] < w - 0.06] -= 50000
-            scores[self.vxs[:, 1] > 0.97] -= 50000
-            scores[self.vxs[:, 1] < 0.03] -= 50000
-            assert scores.max() > -50000
-            xy = self.vxs[np.argmax(scores), :]
-            # ax.axvspan(xy[0] - w, xy[0] + w, xy[1] - 0.07, xy[1] + 0.03,
-            # facecolor='none', edgecolor='red', zorder=19)
-            print("Labelling %s at %.1f" % (name, scores.max()))
-            reglabels.append(xy)
-            label = (r"\sc " + name) if tex else name
-            ax.annotate(xy=xy, text=label,
-                        ha='center', va='center',
-                        bbox=labelbox,
-                        size='large',
-                        zorder=21
-                        )
-
-        borders = []
-        borderadj = defaultdict(list)
-        coasts = []
-        for rv, rp in zip(self.vor.ridge_vertices, self.vor.ridge_points):
-            if -1 in rv or -1 in rp:
-                continue
-            v1, v2 = rv
-            p1, p2 = rp
-            if not (good[v1] and good[v2]):
-                continue
-            if self.territories[v1] != self.territories[v2] and self.elevation[v1] > 0 and self.elevation[v2] > 0:
-                borders.append((p1, p2))
-            if (self.elevation[v1] > 0 and self.elevation[v2] <= 0) or (
-                    self.elevation[v2] > 0 and self.elevation[v1] <= 0):
-                coasts.append(self.pts[rp, :])
-
-        borders = mergelines(relaxpts(self.pts, borders))
-        print("Borders:", len(borders))
-        bordercol = mpl.collections.PathCollection(borders)
-        bordercol.set_facecolor('none')
-        bordercol.set_edgecolor('black')
-        bordercol.set_linestyle(':')
-        bordercol.set_linewidth(3)
-        bordercol.set_zorder(11)
-        ax.add_collection(bordercol)
-
-        coastcol = mpl.collections.PathCollection(mergelines(coasts))
-        coastcol.set_facecolor('none')
-        coastcol.set_edgecolor('black')
-        coastcol.set_zorder(12)
-        coastcol.set_linewidth(1.5)
-        ax.add_collection(coastcol)
-
-        clist = self.ordered_cities()
-        clist = ["topleft"] + list(clist) + ["bottomright"]
-        for c1, c2 in zip(clist[:-1], clist[1:]):
-            path, _ = self.shortest_path(c1, c2)
-            path = mergelines(relaxpts(self.vxs, zip(path[:-1], path[1:])))
-            pathcol = mpl.collections.PathCollection(path)
-            pathcol.set_facecolor('none')
-            pathcol.set_edgecolor('black')
-            pathcol.set_linestyle('--')
-            pathcol.set_linewidth(2.5)
-            pathcol.set_zorder(14)
-            ax.add_collection(pathcol)
-            # plt.plot(self.vxs[path, 0], self.vxs[path, 1], c='red',
-            # zorder=10000, linewidth=2, alpha=0.5)
-
-        ax.axis('image')
-        ax.set_xlim(0.0, 1.0)
-        ax.set_ylim(0.0, 1.0)
-        # plt.xticks(np.arange(0, 21) * .05)
-        # plt.yticks(np.arange(0, 21) * .05)
-        # plt.grid(True)
-        ax.axis('off')
-        plt.savefig(filename, **kwargs)
-        plt.close()
-
-    def name_places(self):
-        self.city_names = {}
-        self.region_names = {}
-        for city in self.cities:
-            self.city_names[city] = self.lang.name("city")
-        for region in np.unique(self.territories):
-            self.region_names[region] = self.lang.name("region")
-
-
-# m = MapGrid(16384)
-# pickle.dump(m, open("map.pickle", "w"))
-
-# m = pickle.load(open("map.pickle"))
-# m.plot()
-# plt.savefig("test.png", dpi=150)
-
 
 if __name__ == '__main__':
     for i in range(10):
@@ -765,7 +528,8 @@ if __name__ == '__main__':
                 try:
                     m = MapGrid(mode=mode)
                     filename = "tests/%s-%02d.png" % (m.mode, i)
-                    m.plot(filename)
+                    plotter = Plotter(m)
+                    plotter.plot(filename)
                     break
                 except AssertionError:
                     print("Failed assertion, retrying")
