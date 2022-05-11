@@ -1,5 +1,5 @@
 import numpy as np
-from height_map import HeightMap
+from map_generation.height_map.height_map import HeightMap
 from map_generation.utils import *
 
 
@@ -20,3 +20,4 @@ class MountainHeightMap(HeightMap):
         self.elevation *= 0.5
         self.elevation[:-1] -= self.elevation[:-1].min() - 0.5
         self.finalize()
+        return self.downhill, self.flow, self.slope

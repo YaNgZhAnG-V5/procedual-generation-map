@@ -1,5 +1,5 @@
 import numpy as np
-from height_map import HeightMap
+from map_generation.height_map.height_map import HeightMap
 from map_generation.utils import *
 
 
@@ -32,6 +32,7 @@ class ShoreHeightMap(HeightMap):
         self.raise_sealevel(np.random.randint(sealevel, sealevel + 20))
         self.clean_coast()
         self.finalize()
+        return self.downhill, self.flow, self.slope
 
     def relax(self):
         newelev = np.zeros_like(self.elevation[:-1])

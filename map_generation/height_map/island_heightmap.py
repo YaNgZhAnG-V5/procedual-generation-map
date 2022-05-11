@@ -1,5 +1,5 @@
 import numpy as np
-from height_map import HeightMap
+from map_generation.height_map.height_map import HeightMap
 from map_generation.utils import *
 
 
@@ -34,3 +34,4 @@ class IslandHeightMap(HeightMap):
         self.raise_sealevel(sealevel)
         self.clean_coast()
         self.finalize()
+        return self.downhill, self.flow, self.slope

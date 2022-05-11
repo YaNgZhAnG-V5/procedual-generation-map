@@ -1,5 +1,5 @@
 import numpy as np
-from height_map import HeightMap
+from map_generation.height_map.height_map import HeightMap
 from map_generation.utils import *
 
 
@@ -14,3 +14,4 @@ class DesertHeightMap(HeightMap):
         self.do_erosion(50, 0.005)
         self.elevation[:-1] -= self.elevation[:-1].min() - 0.1
         self.finalize()
+        return self.downhill, self.flow, self.slope

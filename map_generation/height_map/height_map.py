@@ -6,34 +6,23 @@ from map_generation.utils import *
 
 
 class HeightMap:
-    def __init__(self, mode):
-        self.mode = mode
-        self.erodability = erodability
-        self.elevation = elevation
-        self.vxs = vxs
-        self.dvxs = dvxs
-        self.adj_vxs = adj_vxs
-        self.adj_mat = adj_mat
-        self.edge = edge
+    def __init__(self, grid):
+        self.grid = grid
+        self.mode = self.grid.mode
+        self.erodability = self.grid.erodability
+        self.elevation = self.grid.elevation
+        self.vxs = self.grid.vxs
+        self.dvxs = self.grid.dvxs
+        self.adj_vxs = self.grid.adj_vxs
+        self.adj_mat = self.grid.adj_mat
+        self.edge = self.grid.edge
+        self.regions = self.grid.regions
+        self.pts = self.grid.pts
 
         self.downhill, self.flow, self.slope = None, None, None
 
-    def single_heightmap(self, mode):
-        modefunc = getattr(self, mode + "_heightmap")
-        modefunc()
-        return self.elevation[:-1].copy()
-
-    def mixed_heightmap(self):
-        mode1, mode2 = self.mode.split("/")
-        hm1 = self.single_heightmap(mode1)
-        print("HM1:", mode1, hm1.max(), hm1.min(), hm1.mean())
-        hm2 = self.single_heightmap(mode2)
-        print("HM2:", mode2, hm2.max(), hm2.min(), hm2.mean())
-        mix = 20 * (self.dvxs[:, 0] - self.dvxs[:, 1])
-        mixing = 1 / (1 + np.exp(-mix))
-        print("MIX:", mixing.max(), mixing.min(), mixing.mean())
-        self.elevation[:-1] = mixing * hm2 + (1 - mixing) * hm1
-        self.clean_coast()
+    def get_heightmap(self):
+        pass
 
     def clean_coast(self, n=3, outwards=True):
         for _ in range(n):

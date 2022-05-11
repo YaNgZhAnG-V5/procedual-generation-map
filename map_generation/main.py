@@ -1,5 +1,7 @@
 # coding: utf-8
+import random
 
+from height_map import ShoreHeightMap, IslandHeightMap, MountainHeightMap, DesertHeightMap
 from language import Language
 from civilization import CitiesPlacement
 from plotter import Plotter
@@ -21,10 +23,19 @@ plt.rcParams['font.size'] = 10
 
 class MapGrid(object):
     def __init__(self, mode='shore', n=16384):
-        self.mode = mode
-        self.lang = Language()
-        self.build_grid(n)
+        self.pts = np.random.random((n, 2))
+        self.improve_pts()
+        self.vor = spl.Voronoi(self.pts)
+        self.regions = [self.vor.regions[i] for i in self.vor.point_region]
+        self.vxs = self.vor.vertices
+        self.build_adjs()
+        self.improve_vxs()
+        self.calc_edges()
+        self.distort_vxs()
+        self.elevation = np.zeros(self.vxs.shape[0] + 1)
+        self.erodability = np.ones(self.vxs.shape[0])
 
+        self.mode = mode
         if '/' in mode:
             self.mixed_heightmap()
             mode = mode.split("/")[0]
@@ -35,6 +46,7 @@ class MapGrid(object):
         cities_placer = CitiesPlacement(self.flow, self.elevation, self.vxs, self.adj_vxs, self.edge_weight)
         self.cities = cities_placer.place_cities(np.random.randint(*city_counts[mode]))
         self.territories = cities_placer.grow_territory(np.random.randint(*terr_counts[mode]))
+        self.lang = Language()
         self.city_names, self.region_names = self.lang.name_places(self.cities, self.territories)
 
         self.path_cache = {}
@@ -47,19 +59,6 @@ class MapGrid(object):
     def save(self, filename):
         with gzip.open(filename, "w") as f:
             f.write(pickle.dumps(self))
-
-    def build_grid(self, n):
-        self.pts = np.random.random((n, 2))
-        self.improve_pts()
-        self.vor = spl.Voronoi(self.pts)
-        self.regions = [self.vor.regions[i] for i in self.vor.point_region]
-        self.vxs = self.vor.vertices
-        self.build_adjs()
-        self.improve_vxs()
-        self.calc_edges()
-        self.distort_vxs()
-        self.elevation = np.zeros(self.vxs.shape[0] + 1)
-        self.erodability = np.ones(self.vxs.shape[0])
 
     def improve_pts(self, n=2):
         print("Improving points")
@@ -127,8 +126,20 @@ class MapGrid(object):
         self.dvxs[:, 1] += perlin(self.vxs)
 
     def single_heightmap(self, mode):
-        modefunc = getattr(self, mode + "_heightmap")
-        modefunc()
+        # modefunc = getattr(self, mode + "_heightmap")
+        # modefunc()
+        if mode == "shore":
+            height_map_generator = ShoreHeightMap(self)
+        elif mode == "island":
+            height_map_generator = IslandHeightMap(self)
+        elif mode == "mountain":
+            height_map_generator = MountainHeightMap(self)
+        elif mode == "desert":
+            height_map_generator = DesertHeightMap(self)
+        else:
+            raise NotImplementedError
+        self.downhill, self.flow, self.slope = height_map_generator.get_heightmap()
+        self.set_values_from_height_map_generator(height_map_generator)
         return self.elevation[:-1].copy()
 
     def mixed_heightmap(self):
@@ -142,6 +153,18 @@ class MapGrid(object):
         print("MIX:", mixing.max(), mixing.min(), mixing.mean())
         self.elevation[:-1] = mixing * hm2 + (1 - mixing) * hm1
         self.clean_coast()
+
+    def set_values_from_height_map_generator(self, height_map):
+        self.erodability = height_map.erodability
+        self.elevation = height_map.elevation
+        self.vxs = height_map.vxs
+        self.dvxs = height_map.dvxs
+        self.adj_vxs = height_map.adj_vxs
+        self.adj_mat = height_map.adj_mat
+        self.edge = height_map.edge
+        self.regions = height_map.regions
+        self.pts = height_map.pts
+        self.elevation_pts = height_map.elevation_pts
 
     def clean_coast(self, n=3, outwards=True):
         for _ in range(n):
@@ -295,15 +318,17 @@ class MapGrid(object):
 
 
 if __name__ == '__main__':
-    for i in range(10):
+    seed = 2000
+    random.seed(seed)
+    np.random.seed(seed)
+    for i in range(1):
         for mode in ["shore", "island", "mountain", "desert"]:
+
             plt.close('all')
             while True:
-                try:
-                    m = MapGrid(mode=mode)
-                    filename = "../tests/%s-%02d.png" % (m.mode, i)
-                    plotter = Plotter(m)
-                    plotter.plot(filename)
-                    break
-                except AssertionError:
-                    print("Failed assertion, retrying")
+                m = MapGrid(mode=mode)
+                filename = "../tests/%s-%02d.png" % (m.mode, i)
+                plotter = Plotter(m)
+                plotter.plot(filename)
+                break
+
