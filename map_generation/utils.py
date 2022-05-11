@@ -3,6 +3,14 @@ from collections import defaultdict
 import pickle
 import matplotlib as mpl
 import gzip
+import noise
+
+
+def perlin(vxs, base=None):
+    if base is None:
+        base = np.random.randint(1000)
+    return np.array([noise.pnoise2(x, y, lacunarity=1.7, octaves=3,
+                                   base=base) for x, y in vxs])
 
 
 def distance(a, b):
