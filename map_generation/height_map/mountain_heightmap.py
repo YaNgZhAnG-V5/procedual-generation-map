@@ -7,9 +7,12 @@ class MountainHeightMap(HeightMap):
     def get_heightmap(self):
         theta = np.random.random() * 2 * np.pi
         dvxs = 0.5 * (self.vxs + self.dvxs)
+
+        # draw a centered mountain ridge
         x = (dvxs[:, 0] - .5) * np.cos(theta) + (dvxs[:, 1] - .5) * np.sin(theta)
-        y = (dvxs[:, 0] - .5) * -np.sin(theta) + (dvxs[:, 1] - .5) * np.cos(theta)
         self.elevation[:-1] = 50 - 10 * np.abs(x)
+
+        # create other mountains
         mountains = np.random.random((50, 2))
         for m in mountains:
             self.elevation[:-1] += np.exp(-distance(self.vxs, m) ** 2 / (2 * 0.05 ** 2)) ** 2

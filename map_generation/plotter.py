@@ -1,17 +1,20 @@
 import numpy as np
 import matplotlib as mpl
 from matplotlib import pyplot as plt
-from utils import *
+from map_generation.utils import *
 
 
 class Plotter:
     def __init__(self, map_grid):
         self.map_grid = map_grid
 
-    def plot(self, filename, rivers=True, cmap=mpl.cm.Greys, **kwargs):
+    def plot(self, filename, rivers=True, cmap=mpl.cm.Greys, colormap=False, **kwargs):
         print("Plotting")
         fig = plt.figure(figsize=(6, 6))
         ax = fig.add_axes([0, 0, 1, 1])
+
+        if colormap:
+            ax.scatter(self.map_grid.vxs[:, 0], self.map_grid.vxs[:, 1], c=self.map_grid.elevation[:-1], cmap=cmap)
 
         elev = np.where(self.map_grid.elevation > 0, 0.1, 0)
         good = ~self.map_grid.extend_area(self.map_grid.edge, 10)
@@ -23,7 +26,8 @@ class Plotter:
         slopelines = []
         r = 0.25 * self.map_grid.vxs.shape[0] ** -0.5
         for i in goodidxs:
-            if self.map_grid.elevation[i] <= 0: continue
+            if self.map_grid.elevation[i] <= 0:
+                continue
             t = self.map_grid.tris[i]
             s, s2 = trislope(self.map_grid.pts[t, :], self.map_grid.elevation_pts[t])
             s /= 10
@@ -76,6 +80,7 @@ class Plotter:
             rivercol.set_zorder(9)
             ax.add_collection(rivercol)
 
+        # plot cities
         bigcities = self.map_grid.big_cities
         smallcities = [c for c in self.map_grid.cities if c not in bigcities]
         ax.scatter(self.map_grid.vxs[bigcities, 0], self.map_grid.vxs[bigcities, 1],
@@ -104,10 +109,8 @@ class Plotter:
             w = 0.06 + 0.015 * len(name)
             region = (self.map_grid.territories == terr)
             landregion = region & (self.map_grid.elevation[:-1] > 0)
-            scores = np.zeros(self.map_grid.vxs.shape[0])
             center = np.mean(self.map_grid.vxs[region, :], 0)
             landcenter = np.mean(self.map_grid.vxs[landregion, :], 0)
-            landradius = np.mean(landregion) ** 0.5
             scores = -5000 * distance(self.map_grid.vxs, landcenter)
             scores -= 1000 * distance(self.map_grid.vxs, center)
             scores[~region] -= 3000
@@ -165,13 +168,6 @@ class Plotter:
         bordercol.set_zorder(11)
         ax.add_collection(bordercol)
 
-        coastcol = mpl.collections.PathCollection(mergelines(coasts))
-        coastcol.set_facecolor('none')
-        coastcol.set_edgecolor('black')
-        coastcol.set_zorder(12)
-        coastcol.set_linewidth(1.5)
-        ax.add_collection(coastcol)
-
         clist = self.map_grid.ordered_cities()
         clist = ["topleft"] + list(clist) + ["bottomright"]
         for c1, c2 in zip(clist[:-1], clist[1:]):
@@ -187,12 +183,16 @@ class Plotter:
             # plt.plot(self.vxs[path, 0], self.vxs[path, 1], c='red',
             # zorder=10000, linewidth=2, alpha=0.5)
 
+        coastcol = mpl.collections.PathCollection(mergelines(coasts))
+        coastcol.set_facecolor('none')
+        coastcol.set_edgecolor('black')
+        coastcol.set_zorder(12)
+        coastcol.set_linewidth(1.5)
+        ax.add_collection(coastcol)
+
         ax.axis('image')
         ax.set_xlim(0.0, 1.0)
         ax.set_ylim(0.0, 1.0)
-        # plt.xticks(np.arange(0, 21) * .05)
-        # plt.yticks(np.arange(0, 21) * .05)
-        # plt.grid(True)
         ax.axis('off')
         plt.savefig(filename, **kwargs)
         plt.close()

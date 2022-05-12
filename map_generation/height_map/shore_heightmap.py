@@ -8,8 +8,14 @@ class ShoreHeightMap(HeightMap):
         print("Calculating elevations")
         n = self.vxs.shape[0]
         self.elevation = np.zeros(n + 1)
+
+        # flip and scale x-y axis to introduce randomness (creates a random slope)
         self.elevation[:-1] = 0.5 + ((self.dvxs - 0.5) * np.random.normal(0, 4, (1, 2))).sum(1)
+
+        # either raise or sink the center part (creates cone)
         self.elevation[:-1] += -4 * (np.random.random() - 0.5) * distance(self.vxs, 0.5)
+
+        # create mountains
         mountains = np.random.random((50, 2))
         for m in mountains:
             self.elevation[:-1] += np.exp(-distance(self.vxs, m) ** 2 / (2 * 0.05 ** 2)) ** 2
@@ -18,6 +24,7 @@ class ShoreHeightMap(HeightMap):
         along = (((self.dvxs - 0.5) * np.random.normal(0, 2, (1, 2))).sum(1) + np.random.normal(0, 0.5)) * 10
         self.erodability = np.exp(4 * np.arctan(along))
 
+        # TODO meaning
         for i in range(5):
             self.rift()
             self.relax()

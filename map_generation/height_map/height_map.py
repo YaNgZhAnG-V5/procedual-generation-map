@@ -156,7 +156,6 @@ class HeightMap:
         return h, u, v
 
     def rift(self):
-        v = np.random.normal(0, 5, (1, 2))
         side = 20 * (distance(self.dvxs, 0.5) ** 2 - 1)
         value = np.random.normal(0, 0.3)
         self.elevation[:-1] += np.arctan(side) * value

@@ -1,5 +1,5 @@
 import numpy as np
-from utils import *
+from map_generation.utils import *
 import heapq
 
 

@@ -1,10 +1,11 @@
 # coding: utf-8
 import random
 
-from height_map import ShoreHeightMap, IslandHeightMap, MountainHeightMap, DesertHeightMap
-from language import Language
-from civilization import CitiesPlacement
-from plotter import Plotter
+from map_generation.height_map import ShoreHeightMap, IslandHeightMap, MountainHeightMap, DesertHeightMap
+from map_generation.language import Language
+from map_generation.civilization import CitiesPlacement
+from map_generation.plotter import Plotter
+from map_generation.utils import *
 
 import numpy as np
 import matplotlib as mpl
@@ -15,7 +16,6 @@ import scipy.sparse.csgraph as csg
 import heapq
 import noise
 import itertools
-from utils import *
 
 plt.rcParams['font.family'] = "Palatino Linotype"
 plt.rcParams['font.size'] = 10
@@ -35,47 +35,53 @@ class MapGrid(object):
         self.elevation = np.zeros(self.vxs.shape[0] + 1)
         self.erodability = np.ones(self.vxs.shape[0])
 
-        self.mode = mode
-        if '/' in mode:
-            self.mixed_heightmap()
-            mode = mode.split("/")[0]
-        else:
-            self.single_heightmap(mode)
-        self.riverperc = riverpercs[mode] * np.mean(self.elevation > 0)
-
-        cities_placer = CitiesPlacement(self.flow, self.elevation, self.vxs, self.adj_vxs, self.edge_weight)
-        self.cities = cities_placer.place_cities(np.random.randint(*city_counts[mode]))
-        self.territories = cities_placer.grow_territory(np.random.randint(*terr_counts[mode]))
         self.lang = Language()
-        self.city_names, self.region_names = self.lang.name_places(self.cities, self.territories)
+        self.mode = mode
 
-        self.path_cache = {}
-        self.fill_path_cache(self.big_cities)
+        self.cities, self.territories, self.city_names, self.region_names = None, None, None, None
 
     @property
     def big_cities(self):
         return [c for c in self.cities if self.territories[c] == c]
+
+    def generate_map(self):
+        self.generate_terrain()
+        self.generate_civilization()
+
+    def generate_terrain(self):
+        if '/' in self.mode:
+            self.mixed_heightmap()
+            self.mode = self.mode.split("/")[0]
+        else:
+            self.single_heightmap(self.mode)
+        self.riverperc = riverpercs[self.mode] * np.mean(self.elevation > 0)
+
+    def generate_civilization(self):
+        cities_placer = CitiesPlacement(self.flow, self.elevation, self.vxs, self.adj_vxs, self.edge_weight)
+        self.cities = cities_placer.place_cities(np.random.randint(*city_counts[self.mode]))
+        self.territories = cities_placer.grow_territory(np.random.randint(*terr_counts[self.mode]))
+        self.city_names, self.region_names = self.lang.name_places(self.cities, self.territories)
+
+        self.path_cache = {}
+        self.fill_path_cache(self.big_cities)
 
     def save(self, filename):
         with gzip.open(filename, "w") as f:
             f.write(pickle.dumps(self))
 
     def improve_pts(self, n=2):
+        """ Improving points using Lloyd's algorithm """
         print("Improving points")
         for _ in range(n):
             vor = spl.Voronoi(self.pts)
             newpts = []
             for idx in range(len(vor.points)):
-                pt = vor.points[idx, :]
                 region = vor.regions[vor.point_region[idx]]
                 if -1 in region:
-                    newpts.append(pt)
+                    newpts.append(vor.points[idx, :])
                 else:
                     vxs = np.asarray([vor.vertices[i, :] for i in region])
-                    vxs[vxs < 0] = 0
-                    vxs[vxs > 1] = 1
-                    newpt = np.mean(vxs, 0)
-                    newpts.append(newpt)
+                    newpts.append(np.mean(vxs.clip(0, 1), 0))
             self.pts = np.asarray(newpts)
 
     def improve_vxs(self):
@@ -87,10 +93,10 @@ class MapGrid(object):
     def build_adjs(self):
         print("Building adjacencies")
         self.adj_pts = defaultdict(list)
-        self.adj_vxs = defaultdict(list)
         for p1, p2 in self.vor.ridge_points:
             self.adj_pts[p1].append(p2)
             self.adj_pts[p2].append(p1)
+        self.adj_vxs = defaultdict(list)
         for v1, v2 in self.vor.ridge_vertices:
             self.adj_vxs[v1].append(v2)
             self.adj_vxs[v2].append(v1)
@@ -109,15 +115,12 @@ class MapGrid(object):
                 self.adj_mat[k, :] = v
 
     def calc_edges(self):
+        """" find out vertices, which are on the edge of the map"""
         n = self.vxs.shape[0]
         self.edge = np.zeros(n, bool)
         for u in range(n):
             adjs = self.adj_vxs[u]
-            if -1 in adjs:  # or \
-                #                     np.all(self.vxs[adjs,0] > self.vxs[u,0]) or \
-                #                     np.all(self.vxs[adjs,0] < self.vxs[u,0]) or \
-                #                     np.all(self.vxs[adjs,1] > self.vxs[u,1]) or \
-                #                     np.all(self.vxs[adjs,1] < self.vxs[u,1]):
+            if -1 in adjs:
                 self.edge[u] = True
 
     def distort_vxs(self):
@@ -126,8 +129,6 @@ class MapGrid(object):
         self.dvxs[:, 1] += perlin(self.vxs)
 
     def single_heightmap(self, mode):
-        # modefunc = getattr(self, mode + "_heightmap")
-        # modefunc()
         if mode == "shore":
             height_map_generator = ShoreHeightMap(self)
         elif mode == "island":
@@ -327,6 +328,7 @@ if __name__ == '__main__':
             plt.close('all')
             while True:
                 m = MapGrid(mode=mode)
+                m.generate_map()
                 filename = "../tests/%s-%02d.png" % (m.mode, i)
                 plotter = Plotter(m)
                 plotter.plot(filename)
